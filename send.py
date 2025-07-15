@@ -43,21 +43,20 @@ def fetch_news_headlines(max_items=5):
     feed = feedparser.parse("https://news.google.com/rss/search?q=증시+OR+경제+OR+코스피+OR+비트코인&hl=ko&gl=KR&ceid=KR:ko")
     headlines = []
     for entry in feed.entries[:max_items]:
-        headlines.append(f"- {entry.title} – {entry.source.title if 'source' in entry else 'Google News'}")
+        source = entry.source.title if 'source' in entry else 'Google News'
+        headlines.append(f"- {entry.title} ({source})")
     return "\n".join(headlines)
 
 headlines = fetch_news_headlines()
 
-# GPT 프롬프트 (전문가 보고서 형식)
+# 프롬프트 생성
 prompt = f"""
 🗓 [데일리 브리프 | {today_str} 09:00 KST]
-
-아래는 어제의 자산 종가 및 주요 뉴스 헤드라인입니다.
 
 [헤드라인 목록]
 {headlines}
 
-[지수 및 자산 종가]
+[자산 종가 정보]
 - KOSPI: {prices['KOSPI']} ₩
 - S&P500: {prices['S&P500']} $
 - NASDAQ: {prices['NASDAQ']} $
@@ -66,30 +65,29 @@ prompt = f"""
 - BTC: {prices['BTC']} $
 - ETH: {prices['ETH']} $
 
-위의 내용을 바탕으로 다음 항목을 각각 구성해줘:
+이 정보를 기반으로 다음을 생성해줘:
 
-1️⃣ 전일 주요 뉴스 Top 5 (뉴스 제목 요약 + 출처 이름 포함)
+1️⃣ 어제의 시장 흐름 요약 (3~5줄)
 
-2️⃣ 지수·자산 스냅샷 (아래 형식으로 표로 작성)
+2️⃣ 아래 형식으로 자산 종가 테이블 생성
 | 자산 | 종가 | 일변동 | YTD | 비고 | 출처 |
 |------|------|--------|-----|------|------|
 
-3️⃣ 단기 추천 종목 (1~5일 시계)
-- 최소 3종목 이상, 최대 6종목
-- 아래 형식의 표로 작성
+3️⃣ 단기 추천 종목 테이블 (1~5일 시계)
 | 등급 | 종목명 | 현재가 | 진입범위 | 목표가 | 손절가 | 비고 |
 |------|--------|---------|-----------|--------|--------|------|
 
-4️⃣ 모든 응답은 한글로 작성하고, 가격은 원화(₩) 또는 달러($)로 병기해줘.
-5️⃣ 뉴스 출처는 반드시 포함해줘 (예: Reuters, 조선일보, Bloomberg 등).
-6️⃣ 표는 Markdown 표 형식을 지켜줘.
+📌 모든 표는 Markdown 형식
+📌 수치는 반드시 채워야 하며, 가격은 ₩ 또는 $로 병기
+📌 모든 응답은 한국어로 작성
+📌 뉴스 및 수치 기반으로 신뢰도 있게 요약
 """
 
 # GPT 요청
 response = openai.ChatCompletion.create(
     model="gpt-4",
     messages=[
-        {"role": "system", "content": "너는 실시간 데이터 기반으로 요약과 분석을 하는 한국어 금융 애널리스트야."},
+        {"role": "system", "content": "너는 실시간 데이터를 바탕으로 요약 리포트를 작성하는 한국어 금융 애널리스트야."},
         {"role": "user", "content": prompt}
     ],
     temperature=0.7,
