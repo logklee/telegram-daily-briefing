@@ -16,8 +16,6 @@ openai.api_key = OPENAI_API_KEY
 bot = telegram.Bot(token=BOT_TOKEN)
 today = datetime.datetime.now()
 today_str = today.strftime('%Y-%m-%d')
-weekday = today.weekday()
-day = today.day
 
 # 자산 데이터 수집
 def get_price_yf(ticker):
@@ -40,47 +38,62 @@ prices = {
     "ETH": get_price_coingecko("ethereum"),
 }
 
-# 뉴스 헤드라인 수집 (Google Finance RSS)
+# 뉴스 헤드라인 수집
 def fetch_news_headlines(max_items=5):
     feed = feedparser.parse("https://news.google.com/rss/search?q=증시+OR+경제+OR+코스피+OR+비트코인&hl=ko&gl=KR&ceid=KR:ko")
     headlines = []
     for entry in feed.entries[:max_items]:
-        headlines.append(f"- {entry.title}")
+        headlines.append(f"- {entry.title} – {entry.source.title if 'source' in entry else 'Google News'}")
     return "\n".join(headlines)
 
 headlines = fetch_news_headlines()
 
-# 프롬프트 생성
+# GPT 프롬프트 (전문가 보고서 형식)
 prompt = f"""
-다음은 최근 주요 경제 뉴스 헤드라인입니다:
+🗓 [데일리 브리프 | {today_str} 09:00 KST]
+
+아래는 어제의 자산 종가 및 주요 뉴스 헤드라인입니다.
+
+[헤드라인 목록]
 {headlines}
 
-그리고 다음은 어제 자산 종가입니다:
+[지수 및 자산 종가]
+- KOSPI: {prices['KOSPI']} ₩
+- S&P500: {prices['S&P500']} $
+- NASDAQ: {prices['NASDAQ']} $
+- USD/KRW: {prices['USD/KRW']} ₩
+- WTI: {prices['WTI']} $
+- BTC: {prices['BTC']} $
+- ETH: {prices['ETH']} $
 
-- KOSPI: {prices['KOSPI']} 원
-- S&P500: {prices['S&P500']} 달러
-- NASDAQ: {prices['NASDAQ']} 달러
-- USD/KRW: {prices['USD/KRW']} 원
-- WTI: {prices['WTI']} 달러
-- BTC: {prices['BTC']} 달러
-- ETH: {prices['ETH']} 달러
+위의 내용을 바탕으로 다음 항목을 각각 구성해줘:
 
-이 정보를 기반으로:
+1️⃣ 전일 주요 뉴스 Top 5 (뉴스 제목 요약 + 출처 이름 포함)
 
-1. 시장 흐름 및 심리를 요약해주세요 (3~5줄)
-2. 관련 단기 종목 추천 3~5개 제공 (등급, 진입가, 목표가, 손절가 포함)
-3. 모든 응답은 한글로, 가격은 원 또는 달러로 표기해주세요.
+2️⃣ 지수·자산 스냅샷 (아래 형식으로 표로 작성)
+| 자산 | 종가 | 일변동 | YTD | 비고 | 출처 |
+|------|------|--------|-----|------|------|
+
+3️⃣ 단기 추천 종목 (1~5일 시계)
+- 최소 3종목 이상, 최대 6종목
+- 아래 형식의 표로 작성
+| 등급 | 종목명 | 현재가 | 진입범위 | 목표가 | 손절가 | 비고 |
+|------|--------|---------|-----------|--------|--------|------|
+
+4️⃣ 모든 응답은 한글로 작성하고, 가격은 원화(₩) 또는 달러($)로 병기해줘.
+5️⃣ 뉴스 출처는 반드시 포함해줘 (예: Reuters, 조선일보, Bloomberg 등).
+6️⃣ 표는 Markdown 표 형식을 지켜줘.
 """
 
 # GPT 요청
 response = openai.ChatCompletion.create(
     model="gpt-4",
     messages=[
-        {"role": "system", "content": "너는 실시간 데이터를 받아 요약하는 한국어 투자 전략가야."},
+        {"role": "system", "content": "너는 실시간 데이터 기반으로 요약과 분석을 하는 한국어 금융 애널리스트야."},
         {"role": "user", "content": prompt}
     ],
     temperature=0.7,
-    max_tokens=1200,
+    max_tokens=1600,
 )
 
 # 텔레그램 전송
