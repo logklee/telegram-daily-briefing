@@ -4,21 +4,22 @@ import openai
 import telegram
 import yfinance as yf
 import requests
+import feedparser
 
-# API 키 및 설정
+# 환경 변수
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
+# 설정
 openai.api_key = OPENAI_API_KEY
 bot = telegram.Bot(token=BOT_TOKEN)
-
-# 날짜 설정
 today = datetime.datetime.now()
 today_str = today.strftime('%Y-%m-%d')
 weekday = today.weekday()
 day = today.day
 
-# yfinance로 지수/자산 종가 가져오기
+# 자산 데이터 수집
 def get_price_yf(ticker):
     data = yf.Ticker(ticker)
     hist = data.history(period="2d")
@@ -29,7 +30,6 @@ def get_price_coingecko(coin_id):
     r = requests.get(url)
     return round(r.json()[coin_id]["usd"], 2)
 
-# 자산 수집
 prices = {
     "KOSPI": get_price_yf("^KS11"),
     "S&P500": get_price_yf("^GSPC"),
@@ -40,78 +40,49 @@ prices = {
     "ETH": get_price_coingecko("ethereum"),
 }
 
-# 📌 프롬프트 분기
-if day == 1:
-    # 월간
-    prompt = f"""
-최근 한 달 간의 글로벌 경제 흐름을 요약하고, 아래 자산 종가를 바탕으로 분석해줘:
+# 뉴스 헤드라인 수집 (Google Finance RSS)
+def fetch_news_headlines(max_items=5):
+    feed = feedparser.parse("https://news.google.com/rss/search?q=증시+OR+경제+OR+코스피+OR+비트코인&hl=ko&gl=KR&ceid=KR:ko")
+    headlines = []
+    for entry in feed.entries[:max_items]:
+        headlines.append(f"- {entry.title}")
+    return "\n".join(headlines)
 
-- KOSPI: {prices['KOSPI']} ₩
-- S&P500: {prices['S&P500']} $
-- NASDAQ: {prices['NASDAQ']} $
-- USD/KRW: {prices['USD/KRW']} ₩
-- WTI: {prices['WTI']} $
-- BTC: {prices['BTC']} $
-- ETH: {prices['ETH']} $
+headlines = fetch_news_headlines()
 
-내용:
-1. 전월 주요 뉴스 5건 요약
-2. 주요 자산 동향 요약
-3. 1~3개월 기준 중장기 포트폴리오 제안 (ETF/종목/리스크 분산 포함)
+# 프롬프트 생성
+prompt = f"""
+다음은 최근 주요 경제 뉴스 헤드라인입니다:
+{headlines}
+
+그리고 다음은 어제 자산 종가입니다:
+
+- KOSPI: {prices['KOSPI']} 원
+- S&P500: {prices['S&P500']} 달러
+- NASDAQ: {prices['NASDAQ']} 달러
+- USD/KRW: {prices['USD/KRW']} 원
+- WTI: {prices['WTI']} 달러
+- BTC: {prices['BTC']} 달러
+- ETH: {prices['ETH']} 달러
+
+이 정보를 기반으로:
+
+1. 시장 흐름 및 심리를 요약해주세요 (3~5줄)
+2. 관련 단기 종목 추천 3~5개 제공 (등급, 진입가, 목표가, 손절가 포함)
+3. 모든 응답은 한글로, 가격은 원 또는 달러로 표기해주세요.
 """
 
-elif weekday == 0:
-    # 주간
-    prompt = f"""
-최근 1주일 간의 주요 경제 뉴스와 자산 종가를 기반으로 다음을 요약해줘:
-
-- KOSPI: {prices['KOSPI']} ₩
-- S&P500: {prices['S&P500']} $
-- NASDAQ: {prices['NASDAQ']} $
-- USD/KRW: {prices['USD/KRW']} ₩
-- WTI: {prices['WTI']} $
-- BTC: {prices['BTC']} $
-- ETH: {prices['ETH']} $
-
-내용:
-1. 지난 주 뉴스 Top 5 요약
-2. 주요 지수/자산 주간 변화 분석
-3. 이번 주 주요 경제 이벤트 캘린더
-4. 2~4주 기준 스윙 종목 3~5개 추천 (등급, 목표가 포함)
-"""
-
-else:
-    # 매일
-    prompt = f"""
-다음 자산의 전일 종가를 바탕으로 경제 뉴스 요약 및 단기 종목 추천을 해줘:
-
-- KOSPI: {prices['KOSPI']} ₩
-- S&P500: {prices['S&P500']} $
-- NASDAQ: {prices['NASDAQ']} $
-- USD/KRW: {prices['USD/KRW']} ₩
-- WTI: {prices['WTI']} $
-- BTC: {prices['BTC']} $
-- ETH: {prices['ETH']} $
-
-내용:
-1. 전일 주요 뉴스 5건 요약
-2. 시장 흐름 분석
-3. 1~5일 기준 단기 매매 아이디어 3~5개 추천 (진입가, 목표가, 손절가 포함)
-4. 등급: 강력 매수 / 긍정 / 보수적 접근
-"""
-
-# GPT 호출
+# GPT 요청
 response = openai.ChatCompletion.create(
     model="gpt-4",
     messages=[
-        {"role": "system", "content": "너는 전문 투자 전략가이자 리서치 애널리스트야. 항상 한글로 작성해."},
+        {"role": "system", "content": "너는 실시간 데이터를 받아 요약하는 한국어 투자 전략가야."},
         {"role": "user", "content": prompt}
     ],
     temperature=0.7,
     max_tokens=1200,
 )
 
-result = response.choices[0].message.content
-
 # 텔레그램 전송
+result = response.choices[0].message.content
 bot.send_message(chat_id=CHAT_ID, text=f"📊 {today_str} 마켓 브리핑\n\n{result}")
